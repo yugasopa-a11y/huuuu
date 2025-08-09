@@ -1,0 +1,175 @@
+import type { Express } from "express";
+import { createServer, type Server } from "http";
+import { storage } from "./storage";
+import { insertOrderSchema } from "@shared/schema";
+import multer from "multer";
+import nodemailer from "nodemailer";
+
+// Configure multer for file uploads
+const upload = multer({
+  dest: 'uploads/',
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['.stl', '.obj', '.3mf'];
+    const ext = file.originalname.toLowerCase().slice(file.originalname.lastIndexOf('.'));
+    if (allowedTypes.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only STL, OBJ, and 3MF files are allowed.'));
+    }
+  }
+});
+
+// Configure nodemailer
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: parseInt(process.env.SMTP_PORT || '587'),
+  secure: false,
+  auth: {
+    user: process.env.SMTP_USER || process.env.EMAIL_USER,
+    pass: process.env.SMTP_PASS || process.env.EMAIL_PASS,
+  },
+});
+
+// Mock 3D model analysis function
+function analyze3DModel(file: Express.Multer.File) {
+  // In a real implementation, this would use a 3D model parsing library
+  // For now, we'll use mock data based on file size
+  const fileSizeKB = file.size / 1024;
+  const estimatedWeight = Math.max(10, fileSizeKB * 0.1); // Rough estimate
+  const printTimeMinutes = Math.max(30, estimatedWeight * 5); // 5 minutes per gram estimate
+  
+  return {
+    weight: parseFloat(estimatedWeight.toFixed(2)),
+    printTime: formatPrintTime(printTimeMinutes),
+    baseCost: parseFloat((estimatedWeight * 0.25).toFixed(2)),
+  };
+}
+
+function formatPrintTime(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const mins = Math.floor(minutes % 60);
+  return `${hours}h ${mins}m`;
+}
+
+export async function registerRoutes(app: Express): Promise<Server> {
+  // Create a new order
+  app.post("/api/orders", upload.single('modelFile'), async (req, res) => {
+    try {
+      const orderData = req.body;
+      const modelFile = req.file;
+
+      // Validate the order data
+      const validatedOrder = insertOrderSchema.parse({
+        ...orderData,
+        supportRemoval: orderData.supportRemoval === 'true',
+      });
+
+      let analysis = null;
+      if (modelFile) {
+        analysis = analyze3DModel(modelFile);
+        validatedOrder.modelFileName = modelFile.originalname;
+        validatedOrder.modelWeight = analysis.weight.toString();
+        validatedOrder.printTime = analysis.printTime;
+        validatedOrder.baseCost = analysis.baseCost.toString();
+      }
+
+      // Calculate total cost
+      const baseCost = parseFloat(validatedOrder.baseCost || "0");
+      const supportCost = validatedOrder.supportRemoval ? 5.00 : 0.00;
+      const totalCost = baseCost + supportCost;
+
+      validatedOrder.supportCost = supportCost.toString();
+      validatedOrder.totalCost = totalCost.toString();
+
+      // Create the order
+      const order = await storage.createOrder(validatedOrder);
+
+      // Send email notification
+      try {
+        await sendOrderEmail(order, modelFile);
+      } catch (emailError) {
+        console.error('Failed to send email:', emailError);
+        // Continue with order creation even if email fails
+      }
+
+      res.json(order);
+    } catch (error: any) {
+      console.error('Order creation error:', error);
+      res.status(400).json({ message: error.message || "Failed to create order" });
+    }
+  });
+
+  // Get order by ID
+  app.get("/api/orders/:id", async (req, res) => {
+    try {
+      const order = await storage.getOrder(req.params.id);
+      if (!order) {
+        return res.status(404).json({ message: "Order not found" });
+      }
+      res.json(order);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Analyze 3D model file
+  app.post("/api/analyze-model", upload.single('modelFile'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+
+      const analysis = analyze3DModel(req.file);
+      res.json(analysis);
+    } catch (error: any) {
+      res.status(400).json({ message: error.message });
+    }
+  });
+
+  const httpServer = createServer(app);
+  return httpServer;
+}
+
+async function sendOrderEmail(order: any, modelFile?: Express.Multer.File) {
+  const emailContent = `
+    New 3D Printing Order Received
+    
+    Order ID: ${order.id}
+    Customer: ${order.customerName}
+    Phone: ${order.customerPhone}
+    
+    Delivery Method: ${order.deliveryMethod}
+    ${order.deliveryMethod === 'delivery' ? `
+    Address: ${order.streetAddress}
+    City: ${order.city}, ${order.state} ${order.zipCode}
+    ` : 'Meetup location - customer will be contacted'}
+    
+    Model Details:
+    File: ${order.modelFileName || 'Not provided'}
+    Weight: ${order.modelWeight}g
+    Print Time: ${order.printTime}
+    
+    Pricing:
+    Base Cost: $${order.baseCost}
+    Support Removal: ${order.supportRemoval ? 'Yes (+$5.00)' : 'No'}
+    Total Cost: $${order.totalCost}
+    
+    Order Date: ${new Date(order.createdAt).toLocaleString()}
+  `;
+
+  const mailOptions = {
+    from: process.env.SMTP_USER || process.env.EMAIL_USER,
+    to: 'pointzero3dofficial@gmail.com',
+    subject: `New 3D Printing Order - ${order.customerName}`,
+    text: emailContent,
+    attachments: modelFile ? [{
+      filename: modelFile.originalname,
+      path: modelFile.path,
+    }] : [],
+  };
+
+  await transporter.sendMail(mailOptions);
+}
