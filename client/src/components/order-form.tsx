@@ -80,6 +80,7 @@ export default function OrderForm() {
       });
     },
     onError: (error: any) => {
+      console.error('File analysis error:', error);
       toast({
         title: "Analysis failed",
         description: error.message || "Failed to analyze 3D model",
@@ -122,7 +123,9 @@ export default function OrderForm() {
   });
 
   const handleFileSelect = (file: File) => {
+    console.log('File selected:', file.name, file.type, file.size);
     setSelectedFile(file);
+    setModelAnalysis(null); // Clear previous analysis
     analyzeModelMutation.mutate(file);
   };
 
