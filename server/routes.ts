@@ -74,28 +74,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const orderData = req.body;
       const modelFile = req.file;
 
+      console.log('Full received order data:', orderData);
+
       // Validate the order data
       const validatedOrder = insertOrderSchema.parse({
         ...orderData,
         supportRemoval: orderData.supportRemoval === 'true',
       });
 
-      let analysis = null;
+      // Use provided analysis data if available, otherwise analyze the file
       if (modelFile) {
-        analysis = analyze3DModel(modelFile);
         validatedOrder.modelFileName = modelFile.originalname;
-        validatedOrder.modelWeight = analysis.weight.toString();
-        validatedOrder.printTime = analysis.printTime;
-        validatedOrder.baseCost = analysis.baseCost.toString();
+        
+        // Debug log to check received data
+        console.log('Received order data:', {
+          modelWeight: orderData.modelWeight,
+          printTime: orderData.printTime,
+          baseCost: orderData.baseCost,
+          totalCost: orderData.totalCost,
+          supportCost: orderData.supportCost
+        });
+        
+        // If analysis data was provided from frontend, use it
+        if (orderData.modelWeight && orderData.printTime && orderData.baseCost) {
+          console.log('Using frontend analysis data');
+          validatedOrder.modelWeight = orderData.modelWeight;
+          validatedOrder.printTime = orderData.printTime;
+          validatedOrder.baseCost = orderData.baseCost;
+          validatedOrder.supportCost = orderData.supportCost || (validatedOrder.supportRemoval ? "5.00" : "0.00");
+          validatedOrder.totalCost = orderData.totalCost;
+        } else {
+          // Fallback to backend analysis if no frontend data
+          console.log('Using backend analysis fallback');
+          const analysis = analyze3DModel(modelFile);
+          validatedOrder.modelWeight = analysis.weight.toString();
+          validatedOrder.printTime = analysis.printTime;
+          validatedOrder.baseCost = analysis.baseCost.toString();
+          
+          const baseCost = analysis.baseCost;
+          const supportCost = validatedOrder.supportRemoval ? 5.00 : 0.00;
+          const totalCost = baseCost + supportCost;
+          
+          validatedOrder.supportCost = supportCost.toString();
+          validatedOrder.totalCost = totalCost.toString();
+        }
       }
-
-      // Calculate total cost
-      const baseCost = parseFloat(validatedOrder.baseCost || "0");
-      const supportCost = validatedOrder.supportRemoval ? 5.00 : 0.00;
-      const totalCost = baseCost + supportCost;
-
-      validatedOrder.supportCost = supportCost.toString();
-      validatedOrder.totalCost = totalCost.toString();
 
       // Create the order
       const order = await storage.createOrder(validatedOrder);

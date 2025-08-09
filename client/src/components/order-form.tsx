@@ -98,6 +98,16 @@ export default function OrderForm() {
           formData.append(key, value.toString());
         }
       });
+      
+      // Include model analysis data if available
+      if (modelAnalysis) {
+        formData.append('modelWeight', modelAnalysis.weight.toString());
+        formData.append('printTime', modelAnalysis.printTime);
+        formData.append('baseCost', modelAnalysis.baseCost.toString());
+        formData.append('totalCost', calculateTotalCost().toString());
+        formData.append('supportCost', (data.supportRemoval ? 5.00 : 0.00).toString());
+      }
+      
       if (data.modelFile) {
         formData.append('modelFile', data.modelFile);
       }
