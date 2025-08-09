@@ -424,6 +424,13 @@ export default function OrderForm() {
                         <span>Total Cost:</span>
                         <span className="text-cyan-primary">${calculateTotalCost().toFixed(2)}</span>
                       </div>
+                      
+                      {/* Price Disclaimer */}
+                      <div className="mt-3 p-3 bg-dark-accent rounded-lg">
+                        <p className="text-sm text-text-secondary">
+                          <span className="text-yellow-400">⚠️ Note:</span> The price calculator sometimes malfunctions and may give incorrect pricing estimates. Final pricing will be confirmed before production begins.
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
