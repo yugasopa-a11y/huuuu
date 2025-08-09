@@ -35,11 +35,24 @@ const transporter = nodemailer.createTransport({
 
 // Mock 3D model analysis function
 function analyze3DModel(file: Express.Multer.File) {
-  // In a real implementation, this would use a 3D model parsing library
-  // For now, we'll use mock data based on file size
-  const fileSizeKB = file.size / 1024;
-  const estimatedWeight = Math.max(10, fileSizeKB * 0.1); // Rough estimate
-  const printTimeMinutes = Math.max(30, estimatedWeight * 5); // 5 minutes per gram estimate
+  // More realistic estimation algorithm based on typical 3D prints
+  const fileSizeMB = file.size / (1024 * 1024);
+  
+  // Estimate weight: Most STL files are 1-10MB for small-medium objects (10-100g)
+  // Typical ratio: ~1MB file ≈ 15-25 grams for normal density objects
+  let estimatedWeight;
+  if (fileSizeMB < 1) {
+    estimatedWeight = Math.max(5, fileSizeMB * 20); // Small objects
+  } else if (fileSizeMB < 5) {
+    estimatedWeight = 20 + (fileSizeMB - 1) * 15; // Medium objects
+  } else {
+    estimatedWeight = 80 + (fileSizeMB - 5) * 10; // Large objects
+  }
+  
+  // Print time estimation based on Ender 3 S1 Pro capabilities
+  // Typical speeds: 50-80mm/s, layer height 0.2mm
+  // Rough estimate: 1-3 hours per 10-20 grams of material
+  const printTimeMinutes = Math.max(30, estimatedWeight * 1.5 + (fileSizeMB * 20));
   
   return {
     weight: parseFloat(estimatedWeight.toFixed(2)),
