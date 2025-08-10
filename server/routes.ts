@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertOrderSchema } from "@shared/schema";
 import multer from "multer";
-import nodemailer from "nodemailer";
+import { Resend } from 'resend';
 
 // Configure multer for file uploads
 const upload = multer({
@@ -22,22 +22,14 @@ const upload = multer({
   }
 });
 
-// Configure nodemailer
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER || process.env.EMAIL_USER,
-    pass: process.env.SMTP_PASS || process.env.EMAIL_PASS,
-  },
-});
+// Configure Resend
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Mock 3D model analysis function
 function analyze3DModel(file: Express.Multer.File) {
   // More realistic estimation algorithm based on typical 3D prints
   const fileSizeMB = file.size / (1024 * 1024);
-  
+
   // Estimate weight: Most STL files are 1-10MB for small-medium objects (10-100g)
   // Typical ratio: ~1MB file ≈ 15-25 grams for normal density objects
   let estimatedWeight;
@@ -48,12 +40,12 @@ function analyze3DModel(file: Express.Multer.File) {
   } else {
     estimatedWeight = 80 + (fileSizeMB - 5) * 10; // Large objects
   }
-  
+
   // Print time estimation based on Ender 3 S1 Pro capabilities
   // Typical speeds: 50-80mm/s, layer height 0.2mm
   // Rough estimate: 1-3 hours per 10-20 grams of material
   const printTimeMinutes = Math.max(30, estimatedWeight * 1.5 + (fileSizeMB * 20));
-  
+
   return {
     weight: parseFloat(estimatedWeight.toFixed(2)),
     printTime: formatPrintTime(printTimeMinutes),
@@ -85,7 +77,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Use provided analysis data if available, otherwise analyze the file
       if (modelFile) {
         validatedOrder.modelFileName = modelFile.originalname;
-        
+
         // Debug log to check received data
         console.log('Received order data:', {
           modelWeight: orderData.modelWeight,
@@ -94,7 +86,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           totalCost: orderData.totalCost,
           supportCost: orderData.supportCost
         });
-        
+
         // If analysis data was provided from frontend, use it
         if (orderData.modelWeight && orderData.printTime && orderData.baseCost) {
           console.log('Using frontend analysis data');
@@ -110,11 +102,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           validatedOrder.modelWeight = analysis.weight.toString();
           validatedOrder.printTime = analysis.printTime;
           validatedOrder.baseCost = analysis.baseCost.toString();
-          
+
           const baseCost = analysis.baseCost;
           const supportCost = validatedOrder.supportRemoval ? 5.00 : 0.00;
           const totalCost = baseCost + supportCost;
-          
+
           validatedOrder.supportCost = supportCost.toString();
           validatedOrder.totalCost = totalCost.toString();
         }
@@ -172,40 +164,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
 async function sendOrderEmail(order: any, modelFile?: Express.Multer.File) {
   const emailContent = `
     New 3D Printing Order Received
-    
+
     Order ID: ${order.id}
     Customer: ${order.customerName}
     Phone: ${order.customerPhone}
-    
+
     Delivery Method: ${order.deliveryMethod}
     ${order.deliveryMethod === 'delivery' ? `
     Address: ${order.streetAddress}
     City: ${order.city}, ${order.state} ${order.zipCode}
     ` : 'Meetup location - customer will be contacted'}
-    
+
     Model Details:
     File: ${order.modelFileName || 'Not provided'}
     Weight: ${order.modelWeight}g
     Print Time: ${order.printTime}
-    
+
     Pricing:
     Base Cost: $${order.baseCost}
     Support Removal: ${order.supportRemoval ? 'Yes (+$5.00)' : 'No'}
     Total Cost: $${order.totalCost}
-    
+
     Order Date: ${new Date(order.createdAt).toLocaleString()}
   `;
 
   const mailOptions = {
-    from: process.env.SMTP_USER || process.env.EMAIL_USER,
+    from: process.env.EMAIL_USER || 'pointzero3dofficial@gmail.com', // Use the sender email from environment variable or a default
     to: 'pointzero3dofficial@gmail.com',
     subject: `New 3D Printing Order - ${order.customerName}`,
-    text: emailContent,
+    html: emailContent, // Use html for better formatting
     attachments: modelFile ? [{
       filename: modelFile.originalname,
-      path: modelFile.path,
+      content: await require('fs').promises.readFile(modelFile.path), // Read file content for Resend
+      contentType: require('mime').lookup(modelFile.path) || 'application/octet-stream',
     }] : [],
   };
 
-  await transporter.sendMail(mailOptions);
+  try {
+    const data = await resend.emails.send(mailOptions);
+    console.log('Email sent successfully:', data);
+  } catch (error) {
+    console.error('Error sending email:', error);
+    throw error; // Re-throw the error to be caught by the caller
+  }
 }
