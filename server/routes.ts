@@ -188,16 +188,39 @@ async function sendOrderEmail(order: any, modelFile?: Express.Multer.File) {
     Order Date: ${new Date(order.createdAt).toLocaleString()}
   `;
 
+  let attachments = [];
+  
+  if (modelFile) {
+    try {
+      const fs = await import('fs');
+      const path = await import('path');
+      
+      if (fs.existsSync(modelFile.path)) {
+        const fileContent = fs.readFileSync(modelFile.path);
+        const fileExtension = path.extname(modelFile.originalname).toLowerCase();
+        
+        let contentType = 'application/octet-stream';
+        if (fileExtension === '.stl') contentType = 'application/sla';
+        else if (fileExtension === '.obj') contentType = 'text/plain';
+        else if (fileExtension === '.3mf') contentType = 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml';
+        
+        attachments = [{
+          filename: modelFile.originalname,
+          content: fileContent,
+          contentType: contentType
+        }];
+      }
+    } catch (error) {
+      console.error('Error reading model file for email attachment:', error);
+    }
+  }
+
   const emailOptions = {
-    from: process.env.EMAIL_FROM || 'noreply@example.com', // Use a default or environment variable for 'from'
+    from: 'PointZero Designs <noreply@pointzerodesigns.com>',
     to: 'pointzero3dofficial@gmail.com',
     subject: `New 3D Printing Order - ${order.customerName}`,
-    html: `<pre>${emailContent}</pre>`, // Use html with pre tag for formatting
-    attachments: modelFile ? [{
-      filename: modelFile.originalname,
-      content: require('fs').readFileSync(modelFile.path), // Read file content for attachment
-      contentType: require('mime').lookup(modelFile.path) // Determine content type
-    }] : [],
+    html: `<pre>${emailContent}</pre>`,
+    attachments
   };
 
   await resend.emails.send(emailOptions);
