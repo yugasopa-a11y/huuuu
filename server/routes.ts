@@ -188,23 +188,17 @@ async function sendOrderEmail(order: any, modelFile?: Express.Multer.File) {
     Order Date: ${new Date(order.createdAt).toLocaleString()}
   `;
 
-  const mailOptions = {
-    from: process.env.EMAIL_USER || 'pointzero3dofficial@gmail.com', // Use the sender email from environment variable or a default
+  const emailOptions = {
+    from: process.env.EMAIL_FROM || 'noreply@example.com', // Use a default or environment variable for 'from'
     to: 'pointzero3dofficial@gmail.com',
     subject: `New 3D Printing Order - ${order.customerName}`,
-    html: emailContent, // Use html for better formatting
+    html: `<pre>${emailContent}</pre>`, // Use html with pre tag for formatting
     attachments: modelFile ? [{
       filename: modelFile.originalname,
-      content: await require('fs').promises.readFile(modelFile.path), // Read file content for Resend
-      contentType: require('mime').lookup(modelFile.path) || 'application/octet-stream',
+      content: require('fs').readFileSync(modelFile.path), // Read file content for attachment
+      contentType: require('mime').lookup(modelFile.path) // Determine content type
     }] : [],
   };
 
-  try {
-    const data = await resend.emails.send(mailOptions);
-    console.log('Email sent successfully:', data);
-  } catch (error) {
-    console.error('Error sending email:', error);
-    throw error; // Re-throw the error to be caught by the caller
-  }
+  await resend.emails.send(emailOptions);
 }
