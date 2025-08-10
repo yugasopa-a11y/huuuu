@@ -24,8 +24,11 @@ const upload = multer({
 
 // Configure Resend
 const resendApiKey = process.env.RESEND_API_KEY;
+console.log('Environment check - RESEND_API_KEY exists:', !!resendApiKey);
+console.log('Environment check - NODE_ENV:', process.env.NODE_ENV);
 if (!resendApiKey) {
   console.error('Warning: RESEND_API_KEY environment variable is not set. Email functionality will be disabled.');
+  console.log('Available environment variables:', Object.keys(process.env).filter(key => key.includes('RESEND') || key.includes('API')));
 }
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
 
