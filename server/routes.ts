@@ -23,7 +23,11 @@ const upload = multer({
 });
 
 // Configure Resend
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resendApiKey = process.env.RESEND_API_KEY;
+if (!resendApiKey) {
+  console.error('Warning: RESEND_API_KEY environment variable is not set. Email functionality will be disabled.');
+}
+const resend = resendApiKey ? new Resend(resendApiKey) : null;
 
 // Mock 3D model analysis function
 function analyze3DModel(file: Express.Multer.File) {
@@ -117,7 +121,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Send email notification
       try {
-        await sendOrderEmail(order, modelFile);
+        if (resend) {
+          await sendOrderEmail(order, modelFile);
+        } else {
+          console.log('Email notification skipped - Resend API key not configured');
+        }
       } catch (emailError) {
         console.error('Failed to send email:', emailError);
         // Continue with order creation even if email fails
@@ -162,6 +170,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 }
 
 async function sendOrderEmail(order: any, modelFile?: Express.Multer.File) {
+  if (!resend) {
+    throw new Error('Resend API key not configured');
+  }
   const emailContent = `
     New 3D Printing Order Received
 
